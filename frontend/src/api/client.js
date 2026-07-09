@@ -75,8 +75,10 @@ export const filtersApi = {
 export const structureApi = {
   listVerticalsDetailed: () => api.get('/verticals/detailed'),
   createVertical: (payload) => api.post('/verticals', payload),
+  updateVertical: (id, payload) => api.put(`/verticals/${id}`, payload),
   deleteVertical: (id) => api.delete(`/verticals/${id}`),
   addLob: (verticalId, payload) => api.post(`/verticals/${verticalId}/lobs`, payload),
+  updateLob: (lobId, payload) => api.put(`/lobs/${lobId}`, payload),
   deleteLob: (lobId) => api.delete(`/lobs/${lobId}`),
 };
 
@@ -89,16 +91,4 @@ export const usersApi = {
   create: (payload) => api.post('/users', payload),
   update: (id, payload) => api.put(`/users/${id}`, payload),
   remove: (id) => api.delete(`/users/${id}`),
-};
-
-// ---------------------------------------------------------------------------
-// AI Agents
-// ---------------------------------------------------------------------------
-export const agentsApi = {
-  insight: (payload) => api.post('/api/agents/insight', payload),
-  goal: (payload) => api.post('/api/agents/goal', payload),
-  excel: (payload) => api.post('/api/agents/excel', payload),
-  knowledge: (payload) => api.post('/api/agents/knowledge', payload),
-  decision: (payload) => api.post('/api/agents/decision', payload),
-  chat: (payload) => api.post('/api/agents/chat', payload),
 };

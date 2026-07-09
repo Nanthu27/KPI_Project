@@ -304,11 +304,11 @@ export default function MetricFormPage({
               <TableBody>
                 {dependencies.map((dep, index) => (
                   <TableRow key={`${dep.id}-${index}`}>
-                    <TableCell sx={{ color: COLORS.textSecondary, fontSize: 14 }}>
+                    <TableCell sx={{ color: COLORS.textSecondary, fontSize: 13 }}>
                       {values.name || ''}
                     </TableCell>
-                    <TableCell sx={{ color: COLORS.textSecondary, fontSize: 14 }}>{dep.name}</TableCell>
-                    <TableCell sx={{ color: COLORS.textSecondary, fontSize: 14 }}>{dep.impact_factor}</TableCell>
+                    <TableCell sx={{ color: COLORS.textSecondary, fontSize: 13 }}>{dep.name}</TableCell>
+                    <TableCell sx={{ color: COLORS.textSecondary, fontSize: 13 }}>{dep.impact_factor}</TableCell>
                     <TableCell>
                       <IconButton size="small" onClick={() => handleRemoveDependency(index)}>
                         <DeleteOutlineIcon sx={{ fontSize: 18, color: COLORS.textMuted }} />

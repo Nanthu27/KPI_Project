@@ -6,7 +6,7 @@ import { COLORS } from '../theme/theme';
 const dropdownSx = {
   backgroundColor: '#FFFFFF',
   borderRadius: '6px',
-  fontSize: 14,
+  fontSize: 13,
   fontWeight: 500,
   color: COLORS.textPrimary,
   minWidth: 220,

@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Tabs, Tab, TextField, Button, IconButton,
-  Table, TableHead, TableBody, TableRow, TableCell, Select, MenuItem, FormControl,
+  Table, TableHead, TableBody, TableRow, TableCell, Select, MenuItem, FormControl, Avatar,
 } from '@mui/material';
 import HubIcon from '@mui/icons-material/Hub';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import PostAddIcon from '@mui/icons-material/PostAdd';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
@@ -13,11 +14,11 @@ import { useKpiStore } from '../store/kpiStore';
 import { COLORS } from '../theme/theme';
 
 function MappingTab() {
+  const navigate = useNavigate();
   const { verticalsDetailed, loadVerticalsDetailed, createVertical } = useKpiStore();
   const [verticalName, setVerticalName] = useState('');
   const [lobDraft, setLobDraft] = useState('');
   const [lobs, setLobs] = useState([]);
-  const [showDetails, setShowDetails] = useState(false);
 
   useEffect(() => {
     loadVerticalsDetailed();
@@ -57,7 +58,7 @@ function MappingTab() {
         </Box>
         <Button
           startIcon={<HubIcon />}
-          onClick={() => setShowDetails((s) => !s)}
+          onClick={() => navigate('/structure')}
           variant="contained"
           sx={{ backgroundColor: COLORS.primary, '&:hover': { backgroundColor: COLORS.primaryDark } }}
         >
@@ -118,7 +119,7 @@ function MappingTab() {
                   px: 1, py: 0.75, borderBottom: idx < lobs.length - 1 ? `1px solid ${COLORS.border}` : 'none',
                 }}
               >
-                <Typography sx={{ fontSize: 14 }}>{name}</Typography>
+                <Typography sx={{ fontSize: 13 }}>{name}</Typography>
                 <IconButton size="small" onClick={() => handleRemoveLobDraft(idx)}>
                   <DeleteOutlineIcon sx={{ fontSize: 16, color: COLORS.textMuted }} />
                 </IconButton>
@@ -132,7 +133,7 @@ function MappingTab() {
         <Button
           fullWidth
           variant="contained"
-          onClick={() => { setVerticalName(''); setLobs([]); }}
+          onClick={() => navigate('/structure')}
           sx={{ backgroundColor: COLORS.primary, py: 1.4, '&:hover': { backgroundColor: COLORS.primaryDark } }}
         >
           Back
@@ -147,37 +148,6 @@ function MappingTab() {
           Create
         </Button>
       </Box>
-
-      {showDetails && (
-        <Box sx={{ mt: 5 }}>
-          <Typography sx={{ fontSize: 16, fontWeight: 700, color: COLORS.primary, mb: 2 }}>
-            Existing Vertical / LOB Mappings
-          </Typography>
-          <Table
-            sx={{
-              backgroundColor: '#FFFFFF',
-              border: `1px solid ${COLORS.border}`,
-              '& th': { backgroundColor: '#D7D7DE', fontWeight: 700, fontSize: 13.5 },
-              '& td, & th': { borderBottom: `1px solid ${COLORS.border}` },
-            }}
-          >
-            <TableHead>
-              <TableRow>
-                <TableCell>Vertical / Horizontal Level</TableCell>
-                <TableCell>LOBs</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {verticalsDetailed.map((v) => (
-                <TableRow key={v.id}>
-                  <TableCell sx={{ fontWeight: 600 }}>{v.name}</TableCell>
-                  <TableCell>{v.lobs.map((l) => l.name).join(', ')}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </Box>
-      )}
     </Box>
   );
 }
@@ -251,7 +221,7 @@ function UserOnboardingTab() {
           backgroundColor: '#FFFFFF',
           border: `1px solid ${COLORS.border}`,
           '& th': { backgroundColor: '#EFEFF2', fontWeight: 700, fontSize: 13.5 },
-          '& td, & th': { borderBottom: `1px solid ${COLORS.border}`, fontSize: 14 },
+          '& td, & th': { borderBottom: `1px solid ${COLORS.border}`, fontSize: 13 },
         }}
       >
         <TableHead>
@@ -336,7 +306,25 @@ export default function StructureAccessControlPage() {
 
   return (
     <Box sx={{ backgroundColor: COLORS.background, minHeight: '100%', pb: 6 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', px: 3, py: 2.25, backgroundColor: '#FFFFFF', borderBottom: `1px solid ${COLORS.border}` }}>
+        <Typography sx={{ fontSize: 26, fontWeight: 800, color: COLORS.textPrimary }}>
+          KPI Simulator
+        </Typography>
+        <Avatar sx={{ width: 40, height: 40, backgroundColor: COLORS.primaryDark, fontSize: 13 }}>NG</Avatar>
+      </Box>
       <Box sx={{ maxWidth: 1200, mx: 'auto', px: 3, pt: 3 }}>
+        {/* Persistent back link — always visible, regardless of active tab */}
+        <Button
+          onClick={() => navigate('/')}
+          startIcon={<ArrowBackIcon fontSize="small" />}
+          sx={{
+            mb: 2, color: COLORS.textSecondary, textTransform: 'none', fontWeight: 600,
+            px: 1, '&:hover': { backgroundColor: 'rgba(0,0,0,0.04)' },
+          }}
+        >
+          Back to Simulator
+        </Button>
+
         <Tabs
           value={tab}
           onChange={(_, v) => setTab(v)}

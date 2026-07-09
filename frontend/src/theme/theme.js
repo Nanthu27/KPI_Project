@@ -2,22 +2,22 @@ import { createTheme } from '@mui/material/styles';
 
 /**
  * Design tokens lifted directly from the provided screenshots:
- *  - Primary header bars / buttons: deep slate-purple (#545379)
+ *  - Primary header bars / buttons: deep slate-purple (#818398)
  *  - Page background: light gray (#ECECEC)
  *  - Card surfaces: white, soft shadow, 12px radius
- *  - Slider "benchmark band": purple (#7A5AF8)
+ *  - Slider "benchmark band": purple (#9071AB)
  *  - Up/down indicators: green (#2ECC71) / red (#E74C3C)
  */
 export const COLORS = {
-  primary: '#545379',
+  primary: '#818398',
   primaryDark: '#46455F',
   background: '#ECECEC',
-  panelBackground: '#E4E4EA',
+  panelBackground: '#4A4C6A',
   card: '#FFFFFF',
   border: '#D6D6D6',
   accentGreen: '#2ECC71',
   accentRed: '#E15554',
-  accentPurple: '#7A5AF8',
+  accentPurple: '#9071AB',
   trackGray: '#D9D9DE',
   triangle: '#3F3D56',
   textPrimary: '#2B2A3D',

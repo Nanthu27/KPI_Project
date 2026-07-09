@@ -23,7 +23,7 @@ export default function UserGuidePopover({ open, anchorEl, onClose }) {
         },
       }}
     >
-      <Typography sx={{ fontSize: 14, fontWeight: 700, color: COLORS.textPrimary, mb: 0.5 }}>
+      <Typography sx={{ fontSize: 13, fontWeight: 700, color: COLORS.textPrimary, mb: 0.5 }}>
         📌 Introduction:
       </Typography>
       <Typography sx={{ fontSize: 13.5, color: COLORS.textSecondary, mb: 1.5 }}>
@@ -34,7 +34,7 @@ export default function UserGuidePopover({ open, anchorEl, onClose }) {
 
       <Divider sx={{ my: 1.5 }} />
 
-      <Typography sx={{ fontSize: 14, fontWeight: 700, color: COLORS.textPrimary, mb: 0.5 }}>
+      <Typography sx={{ fontSize: 13, fontWeight: 700, color: COLORS.textPrimary, mb: 0.5 }}>
         📌 Objective:
       </Typography>
       <Box component="ul" sx={{ m: 0, pl: 2.5, mb: 1.5 }}>
@@ -45,7 +45,7 @@ export default function UserGuidePopover({ open, anchorEl, onClose }) {
 
       <Divider sx={{ my: 1.5 }} />
 
-      <Typography sx={{ fontSize: 14, fontWeight: 700, color: COLORS.textPrimary, mb: 0.5 }}>
+      <Typography sx={{ fontSize: 13, fontWeight: 700, color: COLORS.textPrimary, mb: 0.5 }}>
         📌 Components:
       </Typography>
       <Box component="ul" sx={{ m: 0, pl: 2.5, mb: 1.5 }}>
@@ -61,7 +61,7 @@ export default function UserGuidePopover({ open, anchorEl, onClose }) {
 
       <Divider sx={{ my: 1.5 }} />
 
-      <Typography sx={{ fontSize: 14, fontWeight: 700, color: COLORS.textPrimary, mb: 0.5 }}>
+      <Typography sx={{ fontSize: 13, fontWeight: 700, color: COLORS.textPrimary, mb: 0.5 }}>
         💡 Key Assumptions:
       </Typography>
       <Box component="ul" sx={{ m: 0, pl: 2.5 }}>

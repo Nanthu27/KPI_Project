@@ -36,7 +36,7 @@ export default function InterventionCard({
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <Typography
           sx={{
-            fontSize: 14.5,
+            fontSize: 13,
             fontWeight: 600,
             color: COLORS.textPrimary,
             lineHeight: 1.3,
@@ -59,7 +59,13 @@ export default function InterventionCard({
         {record.unit || '%'}
       </Typography>
 
-      <InterventionSlider value={record.percentage} onChange={handleChange} onCommit={handleCommit} />
+      <InterventionSlider
+        value={record.percentage}
+        minValue={record.min_value ?? 0}
+        maxValue={record.max_value ?? 100}
+        onChange={handleChange}
+        onCommit={handleCommit}
+      />
     </Paper>
   );
 }

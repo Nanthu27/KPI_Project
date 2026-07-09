@@ -4,32 +4,56 @@ import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import { COLORS } from '../theme/theme';
 
 /**
- * Shows the improvement_percentage with a colored arrow.
- * Color logic: if higherIsBetter, a positive change is green; otherwise
- * a negative change (i.e. the metric went down, which is good when
- * lower-is-better) is green. Zero change renders neutral gray.
+ * Arrow indicator for KPI metric cards.
+ *
+ * Arrow logic:
+ *   currentValue > savedValue → Up arrow
+ *   currentValue < savedValue → Down arrow
+ *   equal                     → Up arrow (neutral, no color emphasis)
+ *
+ * Color logic (Higher the Better / Lower the Better):
+ *   Higher the Better:
+ *     Increased → Green  |  Decreased → Red
+ *   Lower the Better:
+ *     Increased → Red    |  Decreased → Green
+ *
+ * Props:
+ *   currentValue   – the value currently shown (may include local slider change)
+ *   savedValue     – the value last fetched from DB (= default / previous)
+ *   higherIsBetter – boolean from the metric record
+ *   unit           – display suffix (default '%')
  */
-export default function ImprovementIndicator({ value = 0, higherIsBetter = false, unit = '%' }) {
-  const rounded = Math.round(Math.abs(value));
-  if (rounded === 0) {
-    return (
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, minWidth: 40 }}>
-        <Typography sx={{ fontSize: 13, fontWeight: 600, color: COLORS.textMuted }}>0</Typography>
-        <Typography sx={{ fontSize: 11, color: COLORS.textMuted }}>{unit}</Typography>
-      </Box>
-    );
+export default function ImprovementIndicator({
+  currentValue = 0,
+  savedValue = 0,
+  higherIsBetter = true,
+  unit = '%',
+}) {
+  const increased = currentValue > savedValue;
+  const decreased = currentValue < savedValue;
+
+  const ArrowIcon = increased ? ArrowUpwardIcon : ArrowDownwardIcon;
+
+  let color = COLORS.textMuted; // neutral when equal
+  if (increased) {
+    color = higherIsBetter ? COLORS.accentGreen : COLORS.accentRed;
+  } else if (decreased) {
+    color = higherIsBetter ? COLORS.accentRed : COLORS.accentGreen;
   }
 
-  const isIncrease = value > 0;
-  const isGood = higherIsBetter ? isIncrease : !isIncrease;
-  const color = isGood ? COLORS.accentGreen : COLORS.accentRed;
-  const Icon = isIncrease ? ArrowUpwardIcon : ArrowDownwardIcon;
+  // Display the % change rounded to 1 decimal
+  const changePct =
+    savedValue !== 0
+      ? Math.abs(((currentValue - savedValue) / savedValue) * 100).toFixed(1)
+      : Math.abs(currentValue - savedValue).toFixed(1);
 
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, minWidth: 40 }}>
-      <Icon sx={{ fontSize: 15, color }} />
-      <Typography sx={{ fontSize: 13, fontWeight: 700, color }}>{rounded}</Typography>
-      <Typography sx={{ fontSize: 11, color: COLORS.textMuted }}>{unit}</Typography>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+      <ArrowIcon sx={{ color, fontSize: 16 }} />
+      <Typography sx={{ color, fontWeight: 700, fontSize: 12 }}>
+        {changePct}
+        {unit}
+      </Typography>
     </Box>
   );
 }

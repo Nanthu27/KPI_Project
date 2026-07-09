@@ -1,21 +1,16 @@
-import { Box, Typography, IconButton, Collapse } from '@mui/material';
+import { Box, Typography, IconButton } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { COLORS } from '../theme/theme';
 
 /**
  * One of the 4 vertical columns (Business Outcomes / L1 / L2 / Intervention).
- * - Sticky header with title + "+" add button + expand/collapse chevron.
- * - Clicking the header (or the chevron) toggles a smooth Collapse
- *   animation showing/hiding the card list below.
- * - When expanded, the body scrolls internally if content overflows the
- *   available column height.
+ * - Static header with title + "+" add button.
+ * - Expand/collapse chevron removed per request — column body is always visible.
+ * - Body scrolls internally if content overflows the available column height.
  */
 export default function KPIColumn({
   title,
   column,
-  expanded,
-  onToggleExpand,
   onAddClick,
   isFirstColumn = false,
   children,
@@ -26,14 +21,14 @@ export default function KPIColumn({
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        minWidth: 0,
-        backgroundColor: isFirstColumn ? COLORS.panelBackground : 'transparent',
-        borderRadius: isFirstColumn ? '12px' : 0,
+        minHeight: 0,
+        backgroundColor: isFirstColumn ? COLORS.panelBackground : COLORS.card,
+        borderRadius: '12px',
+        border: isFirstColumn ? 'none' : `1px solid ${COLORS.border}`,
         overflow: 'hidden',
       }}
     >
       <Box
-        onClick={onToggleExpand}
         sx={{
           display: 'flex',
           alignItems: 'center',
@@ -43,32 +38,21 @@ export default function KPIColumn({
           position: 'sticky',
           top: 0,
           zIndex: 2,
-          cursor: 'pointer',
-          backgroundColor: isFirstColumn ? COLORS.panelBackground : COLORS.background,
+          backgroundColor: isFirstColumn ? COLORS.panelBackground : COLORS.card,
           userSelect: 'none',
+          borderBottom: isFirstColumn ? 'none' : `1px solid ${COLORS.border}`,
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <ExpandMoreIcon
-            sx={{
-              fontSize: 20,
-              color: COLORS.textSecondary,
-              transition: 'transform 0.2s ease',
-              transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)',
-            }}
-          />
-          <Typography sx={{ fontSize: 16, fontWeight: 700, color: COLORS.textPrimary }}>
+          <Typography sx={{ fontSize: 16, fontWeight: 700, color: isFirstColumn ? '#FFFFFF' : COLORS.textPrimary }}>
             {title}
           </Typography>
         </Box>
         <IconButton
           size="small"
-          onClick={(e) => {
-            e.stopPropagation();
-            onAddClick();
-          }}
+          onClick={onAddClick}
           sx={{
-            color: COLORS.accentPurple,
+            color: isFirstColumn ? '#FFFFFF' : COLORS.accentPurple,
             backgroundColor: 'rgba(122, 90, 248, 0.08)',
             '&:hover': { backgroundColor: 'rgba(122, 90, 248, 0.16)' },
           }}
@@ -77,24 +61,37 @@ export default function KPIColumn({
         </IconButton>
       </Box>
 
-      <Collapse in={expanded} timeout={250} sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <Box
-          sx={{
-            flex: 1,
-            minHeight: 0,
-            overflowY: 'auto',
-            px: isFirstColumn ? 2 : 1,
-            pb: 2,
-            '&::-webkit-scrollbar': { width: 6 },
-            '&::-webkit-scrollbar-thumb': {
-              backgroundColor: 'rgba(0,0,0,0.18)',
-              borderRadius: 4,
-            },
-          }}
-        >
-          {children}
-        </Box>
-      </Collapse>
+      <Box
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          px: isFirstColumn ? 2 : 1.25,
+          py: 1,
+          scrollbarWidth: 'thin',
+
+          '&::-webkit-scrollbar': {
+            width: '8px',
+          },
+
+          '&::-webkit-scrollbar-track': {
+            background: '#E5E5E5',
+            borderRadius: '10px',
+          },
+
+          '&::-webkit-scrollbar-thumb': {
+            background: '#8A8A8A',
+            borderRadius: '10px',
+          },
+
+          '&::-webkit-scrollbar-thumb:hover': {
+            background: '#6E6E6E',
+          },
+        }}
+      >
+        {children}
+      </Box>
     </Box>
   );
 }
