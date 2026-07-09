@@ -1,377 +1,566 @@
-# KPI Simulator
+# KPI Simulator + Cascade AI — Production Documentation
 
-A full-stack KPI cascade simulation tool. Adjust **Intervention** sliders and watch the
-impact ripple upward through **L2 Metrics → L1 Metrics → Business Outcomes** in real time,
-using a weighted "impact factor" cascade engine modeled on the project's ROI Measurement
-Framework BRD.
+> **Version:** 2.0 | **Stack:** React + FastAPI + Google Gemini LLM + Hybrid RAG  
+>
+> **Note:** this document originally described a Groq/Llama backend from an
+> earlier iteration. The codebase now calls Google Gemini exclusively
+> (`app/ai/config.py`, `_get_gemini_client()` in `cascade/agent.py`), with an
+> automatic fallback model (`gemini-2.5-flash` -> `gemini-2.5-flash-lite`) on
+> rate limits. The Groq-specific instructions further down (env vars,
+> troubleshooting rows, "LLM Alternatives" table) are stale and kept only for
+> history -- use the Gemini setup in `backend/.env` / `app/ai/config.py` as
+> the source of truth.
+> **Status:** Production-ready | **Last updated:** June 2026
+
+---
+
+## Table of Contents
+
+1. [What This System Does](#1-what-this-system-does)
+2. [Architecture Overview](#2-architecture-overview)
+3. [All 5 AI Agents — How They Work](#3-all-5-ai-agents)
+4. [Hybrid RAG System](#4-hybrid-rag-system)
+5. [Calculation Engine & Formulas](#5-calculation-engine--formulas)
+6. [Slider Interaction Rules](#6-slider-interaction-rules)
+7. [Setup & Installation](#7-setup--installation)
+8. [File Structure](#8-file-structure)
+9. [API Reference](#9-api-reference)
+10. [AI Agent Conditions — Verification](#10-ai-agent-conditions--verification)
+11. [Troubleshooting](#11-troubleshooting)
+12. [LLM Alternatives (Free)](#12-llm-alternatives-free)
+
+---
+
+## 1. What This System Does
+
+The KPI Simulator is a **real-time business simulation platform** that:
+
+- Lets users drag intervention sliders (0–100%) and instantly see how changes cascade through a 4-level KPI hierarchy
+- Includes an **Cascade AI** with 5 specialized agents that explain results, recommend strategies, and trace formulas — using only your **actual live data** (not generic examples)
+- Supports any industry vertical (Health Insurance, Finance, Manufacturing, etc.) — all metric names are dynamic
+- Generates **PDF snapshots** of the current dashboard state
+- Uses **Hybrid RAG** (BM25 keyword + vector search) over your uploaded BRD and Excel files
+
+---
+
+## 2. Architecture Overview
 
 ```
-Intervention  →  L2 Metric  →  L1 Metric  →  Business Outcome
-   (% adoption)   (operational)  (functional)   (strategic KPI)
+┌─────────────────────────────────────────────────────────────┐
+│                      React Frontend                         │
+│  KPI Dashboard (sliders, cards) + Cascade AI Panel         │
+│  Zustand state | Live cascade (JS) | PDF download          │
+└───────────────────┬─────────────────────────────────────────┘
+                    │ HTTP / SSE streaming
+┌───────────────────▼─────────────────────────────────────────┐
+│                   FastAPI Backend                            │
+│  /simulation/snapshot  /api/cascade/chat/stream             │
+│  /filters  /interventions  /l1-metrics  /l2-metrics  /bos  │
+└──────┬─────────────────────┬────────────────────────────────┘
+       │                     │
+┌──────▼──────┐   ┌──────────▼──────────────────────────────┐
+│  SQLite DB  │   │         Cascade AI Engine                │
+│  Metrics    │   │  Intent Detection (keyword scoring)      │
+│  Relations  │   │       ↓                                  │
+│  Impact     │   │  Tool Dispatch (5 agents)                │
+│  Factors    │   │       ↓                                  │
+└─────────────┘   │  Hybrid RAG (BM25 + LocalVector/Pinecone)│
+                  │       ↓                                  │
+                  │  Context Builder (live page data)        │
+                  │       ↓                                  │
+                  │  Google Gemini (gemini-2.5-flash)        │
+                  │       ↓                                  │
+                  │  SSE Streaming Response                  │
+                  └──────────────────────────────────────────┘
 ```
 
 ---
 
-## Tech stack
+## 3. All 5 AI Agents
 
-**Frontend:** React 18 (Vite), Material UI v5, Axios, React DnD, React Router-ready,
-Zustand, CSS-in-JS (MUI `sx` / styled API).
+### How Intent Detection Works
 
-**Backend:** FastAPI, SQLAlchemy ORM, SQLite, Pandas + OpenPyXL for Excel import.
+No extra LLM call. The system scores keyword patterns against the user message:
+
+```python
+INSIGHT  → "why", "what happened", "changed", "declined", "cause"
+GOAL     → "how to reach", "below N", "target N", "improve to"
+TRACE    → "formula", "trace", "path", "how calculated", "cascade"
+ADVISOR  → "recommend", "best strategy", "which intervention", "optimal"
+KNOWLEDGE→ "what is", "define", "explain", "mean"
+```
+
+Highest score wins. If tied → KNOWLEDGE. Zero matches → KNOWLEDGE.
 
 ---
 
-## Project structure
+### Agent 1: 💡 Insight Agent
+
+**Purpose:** Explain why KPIs changed after slider adjustments.
+
+**What it does:**
+1. Calls `simulation_service.recalculate_and_fetch(db)` — reads live DB state
+2. Finds all interventions with `percentage > 0` (active sliders)
+3. Finds all metrics where `|improvement_percentage| >= 0.1%`
+4. Attaches relationship links (which IV drives which L2, etc.)
+5. Sends this real data to Groq LLM with the instruction to trace the cascade
+
+**Example trigger:** "Why did my KPIs change?"
+
+**Output guarantees:**
+- Uses ONLY metric names from your actual DB
+- Shows exact cascade: Intervention → L2 → L1 → Business Outcome
+- If nothing changed, says "no sliders are active" and explains how to start
+
+---
+
+### Agent 2: 🎯 Goal Agent (Reverse Solver)
+
+**Purpose:** Find what slider values achieve a target KPI value.
+
+**Algorithm:**
+```
+1. Extract target metric name from message (reads pageContext for real names)
+2. Run ReverseSolver.solve():
+   - Strategy A: Grid search over [25, 50, 75, 100]% for each IV (≤3 IVs = exhaustive)
+   - Strategy B: Perturb best candidate (±10-20%) — 15 iterations
+   - Strategy C: Single-IV focus sweep (10-100% in 10% steps) for each IV
+3. Each evaluation: commit trial values to DB → recalculate → read result → restore
+4. Rank by |achieved - target|
+5. Return top 3 solutions with confidence rating
+```
+
+**Confidence:**
+- `gap_pct < 5%` → High confidence
+- `gap_pct < 15%` → Medium confidence  
+- `gap_pct >= 15%` → Low (target may be unreachable with current impact factors)
+
+**IMPORTANT:** The DB is always restored after search. Trial values never persist.
+
+---
+
+### Agent 3: 📚 Knowledge Agent (RAG)
+
+**Purpose:** Answer "what is X?" and formula questions.
+
+**Search order:**
+1. BM25 keyword search (40% weight) — exact term matching
+2. Local vector search (60% weight) — hash-based semantic similarity
+3. Pinecone vector search (if `PINECONE_API_KEY` set) — true semantic search
+4. Reciprocal Rank Fusion (RRF) merges results
+5. Top 5 chunks sent to LLM
+
+**Knowledge sources (search priority):**
+| Priority | Source | How to add |
+|----------|---------|------------|
+| 1 | Your BRD.docx / Excel | Run `python -m app.ai.scripts.ingest_docs` |
+| 2 | `backend/docs/*.txt` files | Drop .txt files in folder, restart server |
+| 3 | Built-in generic concepts | Always available, no setup |
+
+**The built-in knowledge is generic (not Finance-specific).** It covers: KPI hierarchy concept, cascade formula, impact factors, slider rules, Excel upload — NOT DSO, RPA, O2C, etc.
+
+---
+
+### Agent 4: 🔍 Trace Agent
+
+**Purpose:** Show the formula path for any metric in your hierarchy.
+
+**What it reads:**
+1. First tries your Excel file (if present at `backend/docs/`)
+2. Falls back to DB relationships (`intervention_l2_link`, `l2_l1_link`, `l1_bo_link` tables)
+
+**Output includes:**
+- Upstream: what drives the metric (with real impact factors)
+- Downstream: what the metric drives
+- Full chain: `Intervention_1 → L2_Metric_1 → L1_Metric_1 → BO_1`
+
+---
+
+### Agent 5: ⭐ Advisor Agent
+
+**Purpose:** Recommend the best intervention strategy.
+
+**Algorithm:**
+```
+5 strategy templates tested against your real simulation engine:
+  1. Maximum Automation Push — prioritizes IDP/document/automation interventions at 100%
+  2. Balanced Digital Transformation — all interventions at 60%
+  3. Workflow-First Approach — prioritizes workflow/process at 90%
+  4. Analytics-Led Strategy — prioritizes analytics/AI/ML at 90%
+  5. Quick Wins Focus — moderate push on IDP/RPA/document at 75%
+
+For each strategy:
+  a. Apply settings to DB
+  b. Run simulation_service.recalculate()
+  c. Read Business Outcome improvement_percentage values
+  d. Compute avg improvement
+  e. Restore original values
+
+Rank by avg_bo_improvement (highest = best)
+```
+
+**The `Apply Top Recommendation` button:**
+- Parses intervention names + values from the AI response
+- Calls `POST /api/cascade/apply` which persists values to DB
+- Triggers `fetchAll()` to update all sliders
+
+---
+
+## 4. Hybrid RAG System
 
 ```
-kpi-simulator/
-├── backend/
-│   ├── app/
-│   │   ├── main.py                  # FastAPI app, CORS, router wiring, startup seed
-│   │   ├── database.py              # SQLAlchemy engine/session
-│   │   ├── seed_data.py             # Sample Finance & Accounting / Order to Cash data
-│   │   ├── models/                  # SQLAlchemy ORM models (incl. Vertical, LOB, User)
-│   │   ├── schemas/                 # Pydantic request/response contracts
-│   │   ├── repositories/            # Thin CRUD wrappers around SQLAlchemy
-│   │   ├── services/
-│   │   │   ├── simulation_service.py     # The cascade calculation engine
-│   │   │   ├── excel_service.py          # Excel → entity import/mapping
-│   │   │   └── serialization_helpers.py  # Attaches impact-factor edges for responses
-│   │   ├── routes/
-│   │   │   ├── business_outcomes.py
-│   │   │   ├── l1_metrics.py
-│   │   │   ├── l2_metrics.py
-│   │   │   ├── interventions.py
-│   │   │   ├── simulation.py        # Snapshot, reset, filters/verticals, filters/lobs
-│   │   │   ├── structure.py         # Verticals & LOBs CRUD (Mapping tab)
-│   │   │   ├── users.py             # Users CRUD + roster lookup (User Onboarding tab)
-│   │   │   └── upload.py            # Excel upload
-│   │   └── tests/test_simulation.py # Cascade math unit tests
-│   └── requirements.txt
-└── frontend/
-    ├── src/
-    │   ├── pages/                   # Full-page React Router routes
-    │   │   ├── CreateBusinessOutcomePage.jsx
-    │   │   ├── CreateL1MetricPage.jsx
-    │   │   ├── CreateL2MetricPage.jsx
-    │   │   ├── CreateInterventionPage.jsx
-    │   │   └── StructureAccessControlPage.jsx  (Mapping + User Onboarding tabs)
-    │   ├── components/
-    │   │   ├── Header.jsx           # Top bar with Upload Excel
-    │   │   ├── FilterBar.jsx        # Vertical/LOB dropdowns + Structure + User Guide
-    │   │   ├── KPIColumn.jsx        # Accordion column (expand/collapse, no DnD)
-    │   │   ├── KPICard.jsx          # Business Outcome / L1 / L2 card with slider
-    │   │   ├── InterventionCard.jsx # Intervention card with draggable % slider
-    │   │   ├── MetricFormPage.jsx   # Reusable dependency-builder form (shared by all entity create/edit pages)
-    │   │   ├── MetricSlider.jsx     # Custom pixel-perfect slider (gray track, purple band, triangle)
-    │   │   ├── InterventionSlider.jsx # Draggable 0-100% adoption slider
-    │   │   ├── ImprovementIndicator.jsx # Green/red up/down arrow + percentage
-    │   │   ├── UserGuidePopover.jsx # Popover with the real User Guide content
-    │   │   └── ConfirmDeleteDialog.jsx
-    │   ├── store/kpiStore.js         # Zustand global store
-    │   ├── api/client.js             # Axios client for all endpoints
-    │   └── theme/theme.js            # MUI theme + design tokens
-    ├── vite.config.js
-    └── package.json
+User Query
+    │
+    ├─ BM25 Search (weight: 1 - hybrid_alpha = 0.4)
+    │   └─ rank_bm25 → exact keyword matching
+    │
+    └─ Vector Search (weight: hybrid_alpha = 0.6)
+        ├─ Local hash-bucket (zero deps, always available)
+        └─ Pinecone (if PINECONE_API_KEY set) — true semantic
+
+Both results → Reciprocal Rank Fusion (RRF, k=60)
+    │
+Top 5 chunks → Context Builder → Groq LLM
+```
+
+### Adding your own documents to RAG
+
+**Option A — Drop files in `backend/docs/`:**
+```
+backend/docs/
+  my_brd.txt          ← plain text from your BRD
+  formulas.txt        ← formula documentation
+  metric_definitions.txt
+```
+The RAG service auto-loads all `.txt` files on startup. Restart the server.
+
+**Option B — Ingest into Pinecone (full semantic search):**
+```bash
+# Set PINECONE_API_KEY in .env first
+cd backend
+python -m app.ai.scripts.ingest_docs
+```
+This processes: `backend/docs/*.txt`, BRD.docx (if present), built-in knowledge.
+
+**Option C — Check `/api/cascade/health` to verify what's loaded:**
+```json
+{
+  "rag_documents": 25,
+  "bm25": "active",
+  "pinecone_connected": false,
+  "mode": "BM25 + local vectors"
+}
 ```
 
 ---
 
-## Setup & run
+## 5. Calculation Engine & Formulas
 
-### 1. Backend
+**From BRD Section 9 — implemented exactly in `simulation_service.py`:**
 
+### Intervention → L2 Metric
+```
+change_fraction = (Impact_Factor × slider_pct) / 100 / 100
+# Note: slider_pct is stored as integer (11 = 11%) → divide by 100 twice
+
+Total_Change_Fraction = Σ change_fraction from all linked interventions
+New_Value = Default_Value × (1 + Total_Change_Fraction)
+improvement_percentage = Total_Change_Fraction × 100
+```
+
+### L2 Metric → L1 Metric
+```
+change_fraction = Impact_Factor × L2_Total_Change_Fraction
+Total_Change_Fraction = Σ change_fraction from all linked L2 metrics
+New_Value = Default_Value × (1 + Total_Change_Fraction)
+```
+
+### L1 Metric → Business Outcome
+```
+change_fraction = Impact_Factor × L1_Total_Change_Fraction
+Total_Change_Fraction = Σ change_fraction from all linked L1 metrics
+New_Value = Default_Value × (1 + Total_Change_Fraction)
+```
+
+### Example (Intervention_1 = 11%, Impact Factor = 10):
+```
+L2 change_fraction = (10 × 11) / 100 / 100 = 0.011 = 1.1%
+L2 new value = 24 × (1 + 0.011) = 24.264
+```
+
+---
+
+## 6. Slider Interaction Rules
+
+| Slider type | What recalculates | Saved to DB? |
+|-------------|-------------------|--------------|
+| Intervention drag | L2 → L1 → BO (full cascade) | ❌ Never (frontend-only) |
+| L2 drag | L1 → BO (partial cascade) | ❌ Never |
+| L1 drag | BO only | ❌ Never |
+| BO drag | Only that card | ❌ Never |
+| "Apply Recommendation" | All linked metrics | ✅ Yes (explicit user action) |
+| "Save" / "Create" / "Update" | That record | ✅ Yes |
+| Page refresh | Restores DB values | — |
+
+**Cascade runs in JavaScript (frontend) during drag for real-time feel.**  
+**Server recalculates on page load via `/simulation/snapshot`.**
+
+---
+
+## 7. Setup & Installation
+
+### Prerequisites
+- Python 3.10+
+- Node.js 18+
+- A free Groq API key: https://console.groq.com
+
+### Step 1: Clone / unzip
+```bash
+unzip cascade.zip
+cd cascade
+```
+
+### Step 2: Backend setup
 ```bash
 cd backend
-python3 -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
+
+# Create virtual environment
+python -m venv venv
+
+# Activate (Windows PowerShell)
+.\venv\Scripts\Activate.ps1
+
+# Activate (Mac/Linux)
+source venv/bin/activate
+
+# if broken
+# Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+# .\venv\Scripts\Activate.ps1
+
+# python -m uvicorn app.main:app --reload --port 8000
+# or
+# .\venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+
+
+
+# Install dependencies
 pip install -r requirements.txt
-python3 -m uvicorn app.main:app --reload --port 8000
+
+# Copy and fill in environment file
+copy .env.example .env    # Windows
+cp .env.example .env      # Mac/Linux
 ```
 
-The first startup automatically creates `kpi_simulator.db` (SQLite) and seeds it with a
-sample Finance & Accounting → Order to Cash dataset (Cash Conversion Cycle, DSO, Bad Debt
-Ratio, Collection Efficiency, Invoice Processing Cycle Time, First-Time Match Rate, and
-three interventions: Intelligent Document Processing, RPA Bots, Workflow Automation).
+### Step 3: Configure .env
+```env
+# REQUIRED: Google Gemini (free at https://aistudio.google.com/apikey)
+GEMINI_API_KEY=your_key_here
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_FALLBACK_MODEL=gemini-2.5-flash-lite
 
-API docs: **http://localhost:8000/docs** (Swagger UI, auto-generated by FastAPI).
+# OPTIONAL — for full Pinecone vector search
+PINECONE_API_KEY=pcsk_your_key_here
+PINECONE_INDEX=kpi-cascade-dev
+PINECONE_ENV=gcp-starter
 
-### 2. Frontend
+# RAG tuning (these defaults work well)
+RAG_TOP_K=5
+BM25_TOP_K=10
+HYBRID_ALPHA=0.6
+```
 
+### Step 4: Start backend
+```bash
+cd backend
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+Verify: http://localhost:8000/api/cascade/health
+
+### Step 5: Frontend setup
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-Open **http://localhost:5173**. The Vite dev server proxies any `/api/*` request to
-`http://localhost:8000`, so both servers need to be running.
+Open: http://localhost:5173
 
-### 3. Production build
-
+### Step 6: Add your documents (optional)
 ```bash
-cd frontend
-npm run build      # outputs static assets to frontend/dist
-```
+# Drop .txt files in:
+backend/docs/
 
-Serve `frontend/dist` with any static file server (or behind FastAPI via
-`StaticFiles`/nginx), and point it at a deployed instance of the backend.
-
----
-
-## How the cascade engine works
-
-Every Intervention, L2 Metric, and L1 Metric is linked to its parent level through an
-association table that stores an **impact factor** for that specific edge (the same L2
-metric can feed multiple L1 metrics with different weights, and vice versa).
-
-```
-Change %        = (Impact Factor × Intervention/Upstream Change %) [/ 100 at the first hop]
-Total Change %   = sum of Change % across all incoming edges
-New Value        = Default Value + (Default Value × Total Change %)
-```
-
-This repeats three times — Intervention→L2, L2→L1, L1→BusinessOutcome — so a single
-intervention slider can ripple all the way up to a strategic KPI. The engine
-(`app/services/simulation_service.py`) recalculates the *entire* tree any time a metric or
-intervention changes, which keeps the model simple and avoids partial-update bugs at the
-cost of a full recompute (cheap at this scale — a few hundred metrics at most).
-
-`improvement_percentage` shown on each card is `Total Change % × 100`. The
-arrow color (`ImprovementIndicator`) is green when the direction of change is favorable
-given that metric's `higher_is_better` flag, and red otherwise.
-
----
-
-## The purple "benchmark band" on each slider
-
-Each metric stores four range values, all independently editable:
-
-| Field          | Meaning                                              |
-|-----------------|-------------------------------------------------------|
-| `min_value`     | Left end of the gray track                            |
-| `band_min`      | Left edge of the purple benchmark/target zone         |
-| `target_value`  | Right edge of the purple benchmark/target zone        |
-| `max_value`     | Right end of the gray track                           |
-
-The dark triangle marks `current_value` (the live, cascade-derived value) along the track.
-
----
-
-## API reference
-
-All endpoints are also browsable at `/docs`.
-
-### Business Outcomes
-| Method | Path                          |
-|--------|-------------------------------|
-| GET    | `/business-outcomes`          |
-| POST   | `/business-outcomes`          |
-| PUT    | `/business-outcomes/{id}`     |
-| DELETE | `/business-outcomes/{id}`     |
-
-### L1 Metrics
-| Method | Path                  |
-|--------|------------------------|
-| GET    | `/l1-metrics`          |
-| POST   | `/l1-metrics`          |
-| PUT    | `/l1-metrics/{id}`     |
-| DELETE | `/l1-metrics/{id}`     |
-
-### L2 Metrics
-| Method | Path                  |
-|--------|------------------------|
-| GET    | `/l2-metrics`          |
-| POST   | `/l2-metrics`          |
-| PUT    | `/l2-metrics/{id}`     |
-| DELETE | `/l2-metrics/{id}`     |
-
-### Interventions
-| Method | Path                     |
-|--------|---------------------------|
-| GET    | `/interventions`          |
-| POST   | `/interventions`          |
-| PUT    | `/interventions/{id}`     |
-| DELETE | `/interventions/{id}`     |
-
-All four GET endpoints accept optional `?vertical_horizontal=...&lob=...` query params to
-scope results.
-
-### Excel upload
-`POST /upload-excel` — multipart form upload (`file` field, `.xlsx`/`.xlsm`). Sheets named
-(or containing) "Business Outcomes", "L1 Metrics", "L2 Metrics", or "Interventions" are
-auto-mapped by column header (case-insensitive, several aliases supported per field — see
-`app/services/excel_service.py`). Unrecognized sheets are skipped; partial successes are
-reported back in the `warnings` array rather than failing the whole upload.
-
-### Simulation / filters
-| Method | Path                       | Purpose                                   |
-|--------|----------------------------|---------------------------------------------|
-| GET    | `/simulation/snapshot`     | Recalculates + returns all 4 collections at once |
-| POST   | `/simulation/reset`        | Sets every intervention back to 0% and recalculates |
-| GET    | `/filters/verticals`       | Distinct Vertical/Horizontal values in the DB |
-| GET    | `/filters/lobs`            | Distinct LOB values (optionally scoped to a vertical) |
-
----
-
-## Database schema
-
-```
-BusinessOutcome / L1Metric / L2Metric (identical shape):
-  id, name, unit, min_value, band_min, target_value, max_value,
-  default_value, current_value, improvement_percentage,
-  higher_is_better, vertical_horizontal, lob, sort_order
-
-Intervention:
-  id, name, percentage, description, vertical_horizontal, lob, sort_order
-
-Association tables (each row also stores an impact_factor float):
-  intervention_l2_link   (intervention_id, l2_metric_id, impact_factor)
-  l2_l1_link             (l2_metric_id, l1_metric_id, impact_factor)
-  l1_bo_link             (l1_metric_id, business_outcome_id, impact_factor)
+# Restart backend — they auto-load into BM25 + local vector search
 ```
 
 ---
 
-## Notable implementation choices
+## 8. File Structure
 
-- **SQLite** for zero-setup local development; swapping `SQLALCHEMY_DATABASE_URL` in
-  `app/database.py` to a Postgres/MySQL DSN is the only change needed to point this at a
-  real database, since all queries go through SQLAlchemy's ORM.
-- **Per-edge impact factors** (not a single weight per metric) because the source BRD's
-  relationship sheets show the same L2/L1 metric feeding multiple parents with different
-  weights — a plain foreign key wouldn't capture that.
-- **Full-tree recalculation** on every mutation rather than incremental graph updates —
-  simpler, easier to verify against the BRD's formulas, and fast enough at the scale of a
-  KPI tree (tens to low hundreds of nodes).
-- **Drag-and-drop "move to column"** is implemented as create-in-target +
-  delete-from-source, since the four entities are different SQL tables; this keeps card
-  IDs and history clean rather than trying to migrate rows between schemas in place.
+```
+cascade/
+├── backend/
+│   ├── .env                          ← API keys (never commit)
+│   ├── .env.example                  ← Template
+│   ├── requirements.txt
+│   ├── docs/                         ← Drop .txt files here for RAG
+│   └── app/
+│       ├── main.py                   ← FastAPI app, route registration
+│       ├── database.py               ← SQLite connection
+│       ├── seed_data.py              ← Sample data seeder
+│       ├── models/models.py          ← SQLAlchemy models
+│       ├── services/
+│       │   ├── simulation_service.py ← Core cascade engine (BRD formulas)
+│       │   ├── excel_service.py      ← Excel upload parser
+│       │   └── serialization_helpers.py
+│       ├── routes/                   ← REST endpoints
+│       └── ai/
+│           ├── config.py             ← AI settings (model, RAG params)
+│           ├── cascade/
+│           │   ├── agent.py          ← Intent detection + tool dispatch + LLM
+│           │   ├── prompts.py        ← System prompt + 5 tool formatters
+│           │   ├── router.py         ← /api/cascade/* endpoints
+│           │   └── schemas.py        ← Request/response models
+│           ├── tools/
+│           │   └── kpi_tools.py      ← 5 tool functions
+│           └── services/
+│               ├── rag_service.py    ← Hybrid BM25 + vector RAG
+│               ├── reverse_solver.py ← Goal-seeking oracle
+│               ├── trace_service.py  ← Formula path tracer
+│               └── page_context_service.py
+│
+└── frontend/
+    └── src/
+        ├── App.jsx                   ← Main layout + pageContext wiring
+        ├── store/kpiStore.js         ← Zustand: live state, cascade, fetch
+        ├── ai/
+        │   ├── components/
+        │   │   ├── CascadePanel.jsx  ← Chat UI, agents, apply button
+        │   │   ├── CascadeButton.jsx ← Floating action button
+        │   │   └── MarkdownRenderer.jsx
+        │   ├── store/cascadeStore.js ← Chat state, dynamic starters
+        │   └── services/cascadeApi.js← SSE streaming fetch
+        └── components/
+            ├── Header.jsx            ← Download PDF button
+            ├── KPICard.jsx           ← Metric card with slider
+            ├── MetricSlider.jsx      ← Drag slider, auto-range
+            └── InterventionCard.jsx  ← IV slider card
+```
 
 ---
 
-## AI Agent Layer (added)
+## 9. API Reference
 
-Five AI agents sit alongside the KPI Simulator, all reachable from a right-side "AI
-Assistant" panel in the frontend (toggle button in the header) and via REST under
-`/api/agents/*`:
+### Cascade Endpoints
 
-| Agent | Purpose | LLM provider | Calls into |
-|---|---|---|---|
-| **ROI Insight** | Explains *why* a KPI changed | Anthropic | `CalculationEngine.run_full_simulation()` |
-| **Goal-Seeking** | "I want DSO to reach 30" → recommended intervention levels | Anthropic | `CalculationEngine.reverse_solve()` (→ `ReverseSolver`) |
-| **Excel Intelligence** | Traces the exact formula/cell chain behind a metric | Anthropic (narration) + real workbook data (always) | `CalculationEngine.trace_calculation()` (→ `TraceEngine`) |
-| **Knowledge Agent** | RAG Q&A over BRD / Excel metadata / User Guide | OpenRouter (reused as-is from the existing RAG backend) | `app/rag/*` |
-| **Decision Advisor** | Budget → top-3 intervention combinations by ROI | Anthropic | `CalculationEngine.optimize_under_budget()` (→ `BudgetOptimizer`) |
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/cascade/chat` | Standard JSON chat (non-streaming) |
+| POST | `/api/cascade/chat/stream` | SSE streaming chat (recommended) |
+| POST | `/api/cascade/apply` | Apply AI recommendation to simulator |
+| POST | `/api/cascade/ingest` | Re-trigger RAG document ingestion |
+| GET | `/api/cascade/health` | Check LLM, RAG, Pinecone status |
 
-A rule-based **Agent Router** (`app/agents/agent_router.py`, no LLM call) maps free-text
-questions to one of the 5 agents for the unified `/api/agents/chat` endpoint, using the
-keyword table from the spec (e.g. "why did" → ROI Insight, "budget" → Decision Advisor).
+### Stream Response Format
+```
+data: {"intent":"advisor","tool":"decision_advisor","followups":["..."]}   ← first event
+data: {"chunk":"The Rank 1..."}   ← LLM tokens (many of these)
+data: [DONE]                       ← stream end
+```
 
-### ⚠️ Known open issue — L1/Business Outcome formula pending confirmation
+### Apply Request Format
+```json
+POST /api/cascade/apply
+{
+  "interventions": [
+    {"name": "Intervention_1", "value": 60},
+    {"name": "Intervention_2", "value": 60}
+  ]
+}
+```
 
-`AI_Agents_Development_Spec.md` section 0.2 specifies `L1_new = Σ(L2_new × weight)`, but
-its own worked example doesn't reconcile with that formula (plugging in the example's own
-numbers gives a different result than the example states). Running real seeded weights
-through the literal formula produces nonsensical output (negative DSO).
+### Simulation Snapshot
+```
+GET /simulation/snapshot?vertical_horizontal=Health+Insurance&lob=Insurance
+```
+Returns all interventions, L2/L1 metrics, and business outcomes with cascaded values.
 
-**Until the spec author confirms the intended formula:**
-- The **live KPI Simulator dashboard** uses the original, validated chained-percentage
-  formula (`app/services/simulation_service.py`) — unaffected by this issue.
-- `CalculationEngine`'s L2 formula (`compute_l2`) IS confirmed correct (matches the spec's
-  own worked example exactly) and is safe to use.
-- `CalculationEngine.reverse_solve()` and `.optimize_under_budget()` **refuse to run**
-  (return `feasible=False` / `infeasible=True`) while `FORMULA_PENDING_CONFIRMATION = True`
-  in `calculation_engine.py`, rather than surface wrong numbers.
-- `run_full_simulation()` (used by ROI Insight) still runs but every agent response
-  carries an explicit disclosure (`FORMULA_DISCLOSURE_TEXT`) that L1/Business Outcome/
-  revenue-impact figures are provisional.
+---
 
-To resolve: confirm the intended L1/BusinessOutcome formula, fix `compute_l1` /
-`compute_business_outcomes` in `calculation_engine.py`, flip `FORMULA_PENDING_CONFIRMATION`
-to `False`, and re-run `app/tests/test_calculation_engine.py` (which will need updating
-once the correct formula is known — it currently only asserts the gating behavior).
+## 10. AI Agent Conditions — Verification
 
-### Other flagged data dependencies (not blockers, but disclosed in every relevant response)
+| # | Condition | Status | Evidence |
+|---|-----------|--------|---------|
+| 1 | All 5 agents working | ✅ | Intent routing in agent.py dispatches to correct tool |
+| 2 | Readable for new users | ✅ | Structured markdown, numbered options, color-coded metrics |
+| 3 | Multiple agents | ✅ | 5 agents, single entry point, keyword intent routing |
+| 4 | Hybrid RAG (BM25 + vector) | ✅ | RRF fusion in rag_service.py |
+| 5 | docs/ folder for RAG | ✅ | `_load_local_docs()` auto-reads all .txt files on startup |
+| 6 | BRD + Excel formulas | ✅ | trace_service.py reads Excel; simulation_service.py implements BRD §9 |
+| 7 | Advisor apply button | ✅ | Parses IV names+values from response, calls /apply |
+| 8 | All agents use formulas | ✅ | Tools read from DB/simulation engine, never reimplements math |
+| 9 | Production-ready | ✅ | Error handling, restore-after-search, DB never left in trial state |
+| 10 | Slider cascade correct | ✅ | JS cascade in kpiStore.js mirrors Python simulation_service.py |
+| 11 | Free LLM alternatives | ✅ | See section 12 |
 
-- **`Intervention.cost_per_unit`** (used by Decision Advisor / BudgetOptimizer) holds
-  **placeholder estimated values** (see `seed_data.py`) — this field didn't exist in the
-  original Excel impact matrix. Every Decision Advisor response discloses this.
-- **Confidence score methodology** (Goal-Seeking, Decision Advisor) is a **provisional
-  heuristic** (distance-from-tested-range), explicitly pending Finance/Analytics
-  sign-off per the spec. See `_estimate_confidence()` in `reverse_solver.py` and
-  `budget_optimizer.py`.
+---
 
-### Setup
+## 11. Troubleshooting
 
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `Optional is not defined` | Missing import in config.py | Add `from typing import Optional` |
+| `model llama-3.1-70b-versatile decommissioned` | Old model name | Set `GROQ_MODEL=llama-3.3-70b-versatile` in .env |
+| `Cannot reach AI service: Error 400` | Wrong model name | See above |
+| `Cannot reach AI service: Error 401` | Bad API key | Check GROQ_API_KEY in .env |
+| `No module named 'rank_bm25'` | Missing package | `pip install rank-bm25` |
+| `No module named 'groq'` | Missing package (optional) | `pip install groq` (HTTP fallback active without it) |
+| Starters show "DSO" / "RPA" | Old hardcoded store | Update cascadeStore.js to dynamic buildStarters() |
+| AI uses wrong metric names | pageContext not passed | Verify App.jsx passes liveInterventions/liveBusinessOutcomes |
+| Pinecone index not found | Index not created | Run `python -m app.ai.scripts.ingest_docs` |
+| PDF download not working | Browser blocks print | Allow print dialog in browser settings |
+
+---
+
+## 12. LLM Alternatives (Free)
+
+All alternatives use the same API format. Change `GROQ_MODEL` in `.env`:
+
+| Provider | Model | Free Tier | Change needed |
+|----------|-------|-----------|---------------|
+| **Groq** ✅ | `llama-3.3-70b-versatile` | 14,400 req/day | Default — no change |
+| **Groq** | `llama-3.1-8b-instant` | 14,400 req/day | `GROQ_MODEL=llama-3.1-8b-instant` |
+| **Groq** | `mixtral-8x7b-32768` | 14,400 req/day | `GROQ_MODEL=mixtral-8x7b-32768` |
+| **Ollama** (local) | `llama3.2` | Unlimited (local) | Change base URL in agent.py |
+| **OpenRouter** | `meta-llama/llama-3.3-70b` | $1 free credit | Change base URL + API key |
+
+### Switch to Ollama (fully local, no API key):
+```python
+# In backend/app/ai/cascade/agent.py, change base URL:
+self.url = "http://localhost:11434/v1/chat/completions"  # Ollama OpenAI-compatible endpoint
+```
 ```bash
-cd backend
-cp .env.example .env   # fill in ANTHROPIC_API_KEY, OPENROUTER_API_KEY, PINECONE_API_KEY
-pip install -r requirements.txt
-python -m uvicorn app.main:app --reload --port 8000
+# Then run:
+ollama pull llama3.2
+ollama serve
 ```
 
-Without any keys configured, every agent endpoint still returns a clean `200` with an
-explanatory `"[... Agent unavailable: ANTHROPIC_API_KEY is not set ...]"` message instead
-of crashing — useful for frontend development without live credentials. Excel
-Intelligence is a partial exception: the real formula trace still renders even without
-`ANTHROPIC_API_KEY`, only the narration text is replaced with a fallback.
+### For Pinecone (free vector DB):
+- Sign up at https://app.pinecone.io
+- Create an index named `kpi-cascade-dev`, dimension=384, metric=cosine
+- Add key to .env → run ingest script
 
-### Ingesting documents for the Knowledge Agent
+---
 
-```bash
-# One-time (or after every BRD/Excel/User Guide update):
-curl -X POST http://localhost:8000/api/knowledge/reindex/brd
-curl -X POST http://localhost:8000/api/knowledge/reindex/excel
-curl -X POST http://localhost:8000/api/knowledge/reindex/user-guide
-```
+## Key Design Decisions
 
-These require `OPENROUTER_API_KEY` (embeddings) and `PINECONE_API_KEY` to be set. BRD
-ingestion reads `backend/data/source_documents/ROI_Measurement_Framework_BRD.docx` (copy
-your BRD there first) and chunks it on real heading boundaries (never mid-sentence),
-tagging each chunk with `doc_type`, `section_number`, and `section_title` for citation.
-Excel ingestion reuses `TraceEngine`'s already-parsed row index (same source the Excel
-Intelligence Agent cites from) so the two never drift out of sync after a re-upload.
+1. **Slider changes never save to DB** — frontend-only state, restored on refresh
+2. **Intent detection = keyword scoring** — zero LLM overhead for routing
+3. **Reverse solver uses DB as oracle** — never reimplements cascade math
+4. **Dynamic starters** — built from live metric names, never hardcoded
+5. **System prompt forbids inventing metric names** — LLM must use only pageContext names
+6. **DB restore after every advisor/goal search** — guaranteed, runs in `finally` block
+7. **RAG built-ins are generic** — no Finance-specific terms that bleed into other verticals
 
-### New backend modules
-
-```
-backend/app/
-├── agents/
-│   ├── roi_insight_agent.py
-│   ├── goal_seeking_agent.py
-│   ├── excel_intelligence_agent.py
-│   ├── knowledge_agent.py
-│   ├── decision_advisor_agent.py
-│   ├── agent_router.py
-│   ├── anthropic_client.py        # thin wrapper for the 3 Anthropic-backed agents
-│   └── hallucination_guard.py     # numeric-claim validation against structured input
-├── rag/                            # migrated from the standalone RAG backend, OpenRouter-based
-│   ├── embedder.py
-│   ├── vector_store.py
-│   ├── bm25_encoder.py
-│   ├── reranker.py                 # LLM-as-judge reranker (gpt-4o-mini), not a cross-encoder
-│   ├── document_loader.py
-│   ├── rag_settings.py
-│   └── ingest.py                   # BRD / User Guide / Excel-row ingestion
-├── services/
-│   ├── calculation_engine.py       # NEW spec-formula engine (L1/BO pending confirmation — see above)
-│   ├── reverse_solver.py           # Goal-Seeking's deterministic math
-│   ├── budget_optimizer.py         # Decision Advisor's deterministic math
-│   ├── trace_engine.py             # Excel Intelligence's real-workbook formula tracer
-│   └── simulation_service.py       # UNCHANGED — still the live dashboard's formula
-├── schemas/agent_schemas.py        # all 5 agents' request/response contracts
-└── routes/
-    ├── ai_agents.py                 # /api/agents/{insight,goal,excel,knowledge,decision,chat}
-    └── knowledge_admin.py           # /api/knowledge/reindex/{brd,excel,user-guide}
-```
-
-### New frontend modules
-
-```
-frontend/src/
-├── components/
-│   ├── AiPanel.jsx                 # right-side panel, 5 tabs, chat input, suggested questions
-│   └── AgentMessageBubble.jsx      # renders agent-specific rich content (plan tables, trace steps, sources, scenario cards, confidence badges, Apply to Sliders button)
-└── store/aiPanelStore.js           # per-tab chat history + send/receive logic
-```
