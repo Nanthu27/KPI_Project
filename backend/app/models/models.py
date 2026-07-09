@@ -74,10 +74,8 @@ class BusinessOutcome(FilterScope, Base):
     current_value = Column(Float, nullable=False, default=0)  # live simulated value
     improvement_percentage = Column(Float, nullable=False, default=0)
     higher_is_better = Column(Integer, nullable=False, default=0)  # 0/1 bool: does up=green?
-    # Used by CalculationEngine.compute_revenue_impact() per spec section 0.2:
-    # Revenue_Impact% = delta_L1_pct * benchmark_factor. Each Business Outcome
-    # can define its own factor (defaults to a conservative placeholder).
-    benchmark_factor = Column(Float, nullable=False, default=0.45)
+    manual_override = Column(Integer, default=0)
+    manual_value = Column(Float, nullable=True)
 
     l1_links = relationship(
         "L1Metric", secondary=l1_bo_link, back_populates="business_outcomes"
@@ -98,6 +96,8 @@ class L1Metric(FilterScope, Base):
     current_value = Column(Float, nullable=False, default=0)
     improvement_percentage = Column(Float, nullable=False, default=0)
     higher_is_better = Column(Integer, nullable=False, default=0)
+    manual_override = Column(Integer, default=0)
+    manual_value = Column(Float, nullable=True)
 
     business_outcomes = relationship(
         "BusinessOutcome", secondary=l1_bo_link, back_populates="l1_links"
@@ -121,6 +121,8 @@ class L2Metric(FilterScope, Base):
     current_value = Column(Float, nullable=False, default=0)
     improvement_percentage = Column(Float, nullable=False, default=0)
     higher_is_better = Column(Integer, nullable=False, default=0)
+    manual_override = Column(Integer, default=0)
+    manual_value = Column(Float, nullable=True)
 
     l1_metrics = relationship(
         "L1Metric", secondary=l2_l1_link, back_populates="l2_links"
@@ -137,14 +139,19 @@ class Intervention(FilterScope, Base):
     name = Column(String, nullable=False)
     percentage = Column(Float, nullable=False, default=0)  # 0-100 slider value (adoption %)
     description = Column(String, nullable=True)
-    max_value = Column(Float, nullable=False, default=100)
-    # Cost to implement this intervention at 100% adoption, used by the
-    # Decision Advisor Agent's BudgetOptimizer (spec section 5, FR-5.4).
-    # NOTE: this field did not exist in the original Excel impact matrix —
-    # it is a data dependency flagged by AI_Agents_Development_Spec.md
-    # section 6.4. Values below are PLACEHOLDER ESTIMATES pending real
-    # cost data from Finance; see seed_data.py for per-row notes.
-    cost_per_unit = Column(Float, nullable=False, default=0.0)
+
+    # --- Decision-intelligence metadata -----------------------------------
+    # Per the "an AI cannot invent business knowledge" principle: risk/cost/
+    # effort/confidence are business judgments that must come from admin
+    # configuration, not from an LLM guessing at run time. These feed
+    # decision_engine.py's scenario scoring (goal achievement + risk + cost
+    # + confidence) so Decision Advisor / Goal Agent can rank scenarios by
+    # more than raw KPI movement. Defaults ("Medium"/90%) keep existing rows
+    # and callers working unchanged.
+    risk_level = Column(String, nullable=False, default="Medium")   # "Low" | "Medium" | "High"
+    cost_level = Column(String, nullable=False, default="Medium")   # "Low" | "Medium" | "High"
+    effort_weeks = Column(Float, nullable=False, default=4.0)       # rough implementation time
+    confidence_pct = Column(Float, nullable=False, default=90.0)    # admin's confidence in the impact factors above
 
     l2_metrics = relationship(
         "L2Metric", secondary=intervention_l2_link, back_populates="interventions"

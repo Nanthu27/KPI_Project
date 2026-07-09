@@ -114,31 +114,30 @@ def seed(db: Session) -> None:
     l2_metric_repo.set_l1_links(db, collection_eff_l2.id, [{"l1_metric_id": collection_eff_l1.id, "impact_factor": 0.1667}])
 
     # --- Interventions ---------------------------------------------------
-    # cost_per_unit values below are PLACEHOLDER ESTIMATES (spec section 6.4,
-    # item 2: "Cost-per-intervention data — required specifically for
-    # Decision Advisor Agent, flagged as open dependency"). These did not
-    # exist in the original Excel impact matrix. Figures are rough,
-    # order-of-magnitude implementation-cost guesses for a mid-size F&A
-    # shared-services team (licensing + integration + change management
-    # at 100% rollout), NOT validated by Finance. Replace before using
-    # Decision Advisor's ROI/payback numbers for any real budget decision.
+    # Risk/cost/effort/confidence below are illustrative admin-configured
+    # values (see decision_engine.py) — NOT derived from the BRD, which
+    # (per the benchmark-range discussion) does not define these. They
+    # exist so Decision Advisor / Goal Agent scenario scoring has real
+    # metadata to weight instead of an LLM guessing "this seems risky".
+    # An admin should review/adjust these via the Structure & Access
+    # Control screens before relying on them for real decisions.
     idp = Intervention(
         name="Intelligent Document Processing", percentage=0,
         description="Uses OCR + AI to auto-extract, validate, and process invoices, POs, and contracts",
         vertical_horizontal=VH, lob=LOB, sort_order=0,
-        cost_per_unit=1200.0,  # PLACEHOLDER: $ per 1% adoption at full rollout, pending Finance figures
+        risk_level="High", cost_level="High", effort_weeks=16, confidence_pct=85,
     )
     rpa = Intervention(
         name="RPA Bots", percentage=0,
         description="Automated PO generation, routing, and payment reminders",
         vertical_horizontal=VH, lob=LOB, sort_order=1,
-        cost_per_unit=900.0,  # PLACEHOLDER
+        risk_level="Medium", cost_level="Medium", effort_weeks=8, confidence_pct=92,
     )
     workflow = Intervention(
         name="Workflow Automation", percentage=0,
         description="Standardizes invoice approvals and expense management with automated routing",
         vertical_horizontal=VH, lob=LOB, sort_order=2,
-        cost_per_unit=700.0,  # PLACEHOLDER
+        risk_level="Low", cost_level="Low", effort_weeks=4, confidence_pct=95,
     )
     db.add_all([idp, rpa, workflow])
     db.commit()
@@ -209,6 +208,8 @@ def seed(db: Session) -> None:
 
 def run_seed() -> None:
     Base.metadata.create_all(bind=engine)
+    from .migrations import run_lightweight_migrations
+    run_lightweight_migrations(engine)
     db = SessionLocal()
     try:
         seed(db)

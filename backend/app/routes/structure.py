@@ -33,6 +33,20 @@ def create_vertical(payload: sc.VerticalCreate, db: Session = Depends(get_db)):
     return vertical
 
 
+@router.put("/verticals/{vertical_id}", response_model=sc.VerticalOut)
+def update_vertical(vertical_id: int, payload: sc.VerticalUpdate, db: Session = Depends(get_db)):
+    obj = vertical_repo.get(db, vertical_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Vertical not found")
+    existing = vertical_repo.get_by_name(db, payload.name)
+    if existing and existing.id != vertical_id:
+        raise HTTPException(status_code=400, detail="A Vertical/Horizontal Level with this name already exists")
+    obj.name = payload.name
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
 @router.delete("/verticals/{vertical_id}")
 def delete_vertical(vertical_id: int, db: Session = Depends(get_db)):
     obj = vertical_repo.get(db, vertical_id)
@@ -49,6 +63,17 @@ def add_lob(vertical_id: int, payload: sc.LOBCreate, db: Session = Depends(get_d
         raise HTTPException(status_code=404, detail="Vertical not found")
     lob = LOB(name=payload.name, vertical_id=vertical_id)
     return lob_repo.create(db, lob)
+
+
+@router.put("/lobs/{lob_id}", response_model=sc.LOBOut)
+def update_lob(lob_id: int, payload: sc.LOBUpdate, db: Session = Depends(get_db)):
+    obj = lob_repo.get(db, lob_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="LOB not found")
+    obj.name = payload.name
+    db.commit()
+    db.refresh(obj)
+    return obj
 
 
 @router.delete("/lobs/{lob_id}")

@@ -1,3 +1,4 @@
+# ── Existing (DO NOT REMOVE) ──────────────────────────────────────────
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
 sqlalchemy==2.0.30
@@ -7,11 +8,33 @@ pydantic==2.7.4
 python-multipart==0.0.9
 pytest==8.2.2
 
-# --- AI Agents + RAG (added for the agent layer) ---------------------------
-anthropic>=0.40.0          # ROI Insight, Goal-Seeking, Decision Advisor agents
-openai>=1.30.0             # OpenRouter client (OpenAI-compatible) for Knowledge Agent's RAG pipeline
-pinecone==5.0.1            # Vector DB for Knowledge Agent
-python-docx==1.1.0         # BRD ingestion (already used by file-reading skill, pinned here for the backend too)
-tiktoken==0.6.0            # token-aware chunking; falls back to a word-count heuristic if its model file can't be downloaded
-python-dotenv==1.0.0
-httpx>=0.27.0
+# ── AI Copilot (NEW — additive) ───────────────────────────────────────
+# LLM: Google Gemini — called via plain stdlib HTTP (urllib), no SDK required.
+
+# LangChain
+langchain>=0.2.0
+langchain-community>=0.2.0
+langchain-core>=0.2.0
+
+# LangGraph — multi-agent orchestration layer (app/ai/graph)
+langgraph>=0.2.20
+
+# Vector DB (optional — BM25 works without Pinecone)
+pinecone>=6.0.0
+langchain-pinecone>=0.1.0
+
+# RAG / Search
+rank-bm25>=0.2.2                # BM25 keyword search (no API key needed)
+
+# Embeddings (optional — only needed for Pinecone ingestion)
+sentence-transformers>=2.7.0
+
+# Streaming
+sse-starlette>=2.1.0
+
+# Document loading
+python-docx>=1.1.0              # For BRD .docx ingestion
+
+# Env
+python-dotenv>=1.0.0
+pip-system-certs>=5.3

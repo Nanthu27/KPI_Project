@@ -51,12 +51,21 @@ class MetricUpdate(BaseModel):
     vertical_horizontal: Optional[str] = None
     lob: Optional[str] = None
     sort_order: Optional[int] = None
+    
+    manual_override: Optional[bool] = None
+    manual_value: Optional[float] = None
 
+class MetricManualOverride(BaseModel):
+    manual_override: bool = True
+    manual_value: float
 
 class MetricOut(MetricBase):
     id: int
     current_value: float
     improvement_percentage: float
+
+    manual_override: bool = False
+    manual_value: Optional[float] = None
 
     class Config:
         from_attributes = True
@@ -67,15 +76,15 @@ class MetricOut(MetricBase):
 # ---------------------------------------------------------------------------
 
 class BusinessOutcomeCreate(MetricBase):
-    benchmark_factor: float = 0.45
+    pass
 
 
 class BusinessOutcomeUpdate(MetricUpdate):
-    benchmark_factor: Optional[float] = None
+    pass
 
 
 class BusinessOutcome(MetricOut):
-    benchmark_factor: float = 0.45
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -135,8 +144,12 @@ class InterventionBase(BaseModel):
     vertical_horizontal: str = "Finance & Accounting"
     lob: str = "Order to Cash"
     sort_order: int = 0
-    max_value: float = 100
-    cost_per_unit: float = 0.0
+    # Decision-intelligence metadata (see ai/services/decision_engine.py).
+    # Admin-configured, never inferred by the AI — see models.py docstring.
+    risk_level: str = "Medium"
+    cost_level: str = "Medium"
+    effort_weeks: float = 4.0
+    confidence_pct: float = 90.0
 
 
 class InterventionCreate(InterventionBase):
@@ -153,8 +166,10 @@ class InterventionUpdate(BaseModel):
     vertical_horizontal: Optional[str] = None
     lob: Optional[str] = None
     sort_order: Optional[int] = None
-    max_value: Optional[float] = None
-    cost_per_unit: Optional[float] = None
+    risk_level: Optional[str] = None
+    cost_level: Optional[str] = None
+    effort_weeks: Optional[float] = None
+    confidence_pct: Optional[float] = None
     l2_links: Optional[List[dict]] = None
 
 
@@ -207,6 +222,14 @@ class LOBOut(BaseModel):
 class VerticalCreate(BaseModel):
     name: str
     lobs: List[str] = Field(default_factory=list)
+
+
+class VerticalUpdate(BaseModel):
+    name: str
+
+
+class LOBUpdate(BaseModel):
+    name: str
 
 
 class VerticalOut(BaseModel):

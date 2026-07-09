@@ -1,23 +1,11 @@
 """
-Simulation service — LIVE DASHBOARD FORMULA (validated, chained-%).
+Simulation engine.
 
-This module is the calculation path actually used by the KPI Simulator
-dashboard (every CRUD route calls simulation_service.recalculate(db)
-after a mutation). It intentionally does NOT use the new
-CalculationEngine's weighted-sum formula from
-AI_Agents_Development_Spec.md section 0.2, because that formula's own
-worked example doesn't reconcile with the formula as written (see the
-big warning block at the top of services/calculation_engine.py) and
-produces nonsensical numbers (negative DSO, negative Bad Debt Ratio)
-with the current seed weights. Product decision: keep the dashboard on
-this validated formula until the spec author confirms the correct
-interpretation of the new one.
-
-Implements the BRD's original "Calculation Logic" (chained percentage
-cascade):
+Implements BRD section 9 "Calculation Logic" exactly:
 
   Intervention -> L2 Metrics
-    Change %       = (Impact Factor x Intervention New Value %) / 100
+    Intervention % = Slider Value / 100
+    Change %       = (Impact Factor x Intervention %) / 100
     Total Change % = sum(Change % from all related interventions)
     New Value      = Default Value + (Default Value x Total Change %)
 
@@ -31,17 +19,14 @@ cascade):
     Total Change % = sum(Change % from all related L1 metrics)
     New Value      = Default Value + (Default Value x Total Change %)
 
-`improvement_percentage` on every metric is simply Total Change% * 100,
-signed so the UI can color it green/red depending on whether the
-metric's "higher_is_better" flag agrees with the direction of travel.
+Each level's "Total Change %" computed above becomes the upstream input
+for the next level, so the three blocks chain together into a single
+top-to-bottom recalculation triggered any time an intervention slider
+(or a manual override) changes.
 
-NOTE for the AI agents: CalculationEngine.run_full_simulation(),
-.reverse_solve(), .trace_calculation(), and .optimize_under_budget()
-(in calculation_engine.py) are SEPARATE from this module and use the
-new spec formula for their own internal math — that's an intentional,
-isolated area pending confirmation, not a bug. Once the formula
-ambiguity is resolved, this module and that one should be reconciled
-into a single engine again.
+`improvement_percentage` on every metric is simply Total Change % * 100,
+signed so that the UI can color it green/red depending on whether the
+metric's "higher_is_better" flag agrees with the direction of travel.
 """
 from typing import Dict, List
 from sqlalchemy.orm import Session
@@ -62,6 +47,7 @@ def recalculate(db: Session) -> None:
     Recomputes current_value + improvement_percentage for every
     L2Metric, L1Metric, and BusinessOutcome row, cascading up from
     whatever the Intervention.percentage values currently are.
+
     Mutates ORM objects in place and commits once at the end.
     """
     interventions: List[Intervention] = db.query(Intervention).all()
@@ -70,6 +56,7 @@ def recalculate(db: Session) -> None:
     business_outcomes: List[BusinessOutcome] = db.query(BusinessOutcome).all()
 
     # ---- Step 1: Intervention -> L2 ------------------------------------
+    # edge rows: (intervention_id, l2_metric_id, impact_factor)
     iv_l2_edges = db.execute(select(
         intervention_l2_link.c.intervention_id,
         intervention_l2_link.c.l2_metric_id,
@@ -80,15 +67,28 @@ def recalculate(db: Session) -> None:
 
     l2_total_change: Dict[int, float] = {m.id: 0.0 for m in l2_metrics}
     for intervention_id, l2_id, impact_factor in iv_l2_edges:
-        new_value_pct = intervention_value_by_id.get(intervention_id, 0.0)
-        change_pct = (impact_factor * new_value_pct) / 100.0
+        # Excel stores a slider value like 17% as 0.17 before applying
+        # T = Impact Factor * Intervention New Value % / 100.
+        slider_pct = intervention_value_by_id.get(intervention_id, 0.0)
+        intervention_fraction = slider_pct / 100.0
+        change_pct = (impact_factor * intervention_fraction) / 100.0
         if l2_id in l2_total_change:
             l2_total_change[l2_id] += change_pct
 
     for metric in l2_metrics:
         total_change = l2_total_change.get(metric.id, 0.0)
-        metric.current_value = _round(metric.default_value + (metric.default_value * total_change))
-        metric.improvement_percentage = _round(total_change * 100, 2)
+        if metric.manual_override and metric.manual_value is not None:
+            metric.current_value = metric.manual_value
+            # Effective change% from manual value — used as upstream for L1 cascade
+            effective_change = (
+                (metric.manual_value - metric.default_value) / metric.default_value
+                if metric.default_value != 0 else 0.0
+            )
+            l2_total_change[metric.id] = effective_change
+            metric.improvement_percentage = _round(effective_change * 100, 2)
+        else:
+            metric.current_value = _round(metric.default_value + (metric.default_value * total_change))
+            metric.improvement_percentage = _round(total_change * 100, 2)
 
     # ---- Step 2: L2 -> L1 ------------------------------------------------
     l2_l1_edges = db.execute(select(
@@ -106,8 +106,17 @@ def recalculate(db: Session) -> None:
 
     for metric in l1_metrics:
         total_change = l1_total_change.get(metric.id, 0.0)
-        metric.current_value = _round(metric.default_value + (metric.default_value * total_change))
-        metric.improvement_percentage = _round(total_change * 100, 2)
+        if metric.manual_override and metric.manual_value is not None:
+            metric.current_value = metric.manual_value
+            effective_change = (
+                (metric.manual_value - metric.default_value) / metric.default_value
+                if metric.default_value != 0 else 0.0
+            )
+            l1_total_change[metric.id] = effective_change
+            metric.improvement_percentage = _round(effective_change * 100, 2)
+        else:
+            metric.current_value = _round(metric.default_value + (metric.default_value * total_change))
+            metric.improvement_percentage = _round(total_change * 100, 2)
 
     # ---- Step 3: L1 -> Business Outcome ----------------------------------
     l1_bo_edges = db.execute(select(
@@ -125,8 +134,16 @@ def recalculate(db: Session) -> None:
 
     for outcome in business_outcomes:
         total_change = bo_total_change.get(outcome.id, 0.0)
-        outcome.current_value = _round(outcome.default_value + (outcome.default_value * total_change))
-        outcome.improvement_percentage = _round(total_change * 100, 2)
+        if outcome.manual_override and outcome.manual_value is not None:
+            outcome.current_value = outcome.manual_value
+            effective_change = (
+                (outcome.manual_value - outcome.default_value) / outcome.default_value
+                if outcome.default_value != 0 else 0.0
+            )
+            outcome.improvement_percentage = _round(effective_change * 100, 2)
+        else:
+            outcome.current_value = _round(outcome.default_value + (outcome.default_value * total_change))
+            outcome.improvement_percentage = _round(total_change * 100, 2)
 
     db.commit()
 

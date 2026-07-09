@@ -1,0 +1,164 @@
+KPI Simulator Formula Knowledge
+Source: Calculation Sheet_KPI Simulator (3) (1).xlsx, sheet "Simulation Formulae"
+
+Purpose
+This document explains the verified Excel calculation logic used by the KPI Simulator.
+Do not invent alternate formulas. The Excel workbook is the source of truth.
+
+Hierarchy
+Intervention -> L2 Metric -> L1 Metric -> Business Outcome
+
+Core Rules
+1. Intervention sliders are displayed as 0 to 100 in the frontend.
+2. Excel treats a displayed slider value as a percent fraction before applying intervention impact.
+   Example: slider 17 means 17%, so Excel uses 0.17.
+3. Each mapped relationship has an impact factor.
+4. A metric can have multiple upstream dependencies.
+5. The total change fraction for a metric is the sum of all related upstream change fractions.
+6. New Value = Default Value + (Default Value * Total Change Fraction).
+7. Improvement Percentage = Total Change Fraction * 100.
+8. If every intervention slider is 0, all mapped L2, L1, and Business Outcome values return to their original default values.
+
+Formula By Level
+
+Intervention to L2 Metric
+Excel columns:
+- Intervention slider output is in column Z.
+- Intervention impact factor is in column S.
+- Change fraction because of intervention is in column T.
+- Total L2 change fraction is in column U.
+- L2 new value is in column V.
+
+Formula:
+intervention_fraction = slider_value / 100
+l2_change_fraction = (impact_factor * intervention_fraction) / 100
+l2_total_change_fraction = sum(l2_change_fraction from all related interventions)
+l2_new_value = l2_default_value + (l2_default_value * l2_total_change_fraction)
+
+Plain language:
+Convert the intervention slider into a percent fraction, multiply it by the relationship impact factor, divide by 100, then add the effect of all interventions mapped to that L2 metric. Apply that total change to the L2 default value.
+
+L2 Metric to L1 Metric
+Excel columns:
+- L2 total change fraction is in column U.
+- L2-to-L1 impact factor is in column L.
+- Change fraction because of L2 is in column M.
+- L1 total change fraction is in column N.
+- L1 new value is in column O.
+
+Formula:
+l1_change_fraction = l2_to_l1_impact_factor * l2_total_change_fraction
+l1_total_change_fraction = sum(l1_change_fraction from all related L2 metrics)
+l1_new_value = l1_default_value + (l1_default_value * l1_total_change_fraction)
+
+Plain language:
+Take each related L2 metric's total change, multiply it by the L2-to-L1 impact factor, add all those effects together, and apply the total to the L1 default value.
+
+L1 Metric to Business Outcome
+Excel columns:
+- L1 total change fraction is in column N.
+- L1-to-BO impact factor is in column E.
+- Change fraction because of L1 is in column F.
+- Business Outcome total change fraction is in column G.
+- Business Outcome new value is in column H.
+
+Formula:
+bo_change_fraction = l1_to_bo_impact_factor * l1_total_change_fraction
+bo_total_change_fraction = sum(bo_change_fraction from all related L1 metrics)
+bo_new_value = bo_default_value + (bo_default_value * bo_total_change_fraction)
+
+Plain language:
+Take each related L1 metric's total change, multiply it by the L1-to-Business Outcome impact factor, add all those effects together, and apply the total to the Business Outcome default value.
+
+Workbook Mappings From "Simulation Formulae"
+
+Business Outcome
+- BO_1 default value = 100
+- BO_1 depends on L1_Metric 1 with impact factor -0.35
+- BO_1 depends on L1_Metric 2 with impact factor -0.55
+
+L1 Metrics
+- L1_Metric 1 default value = 40
+- L1_Metric 1 depends on L2_Metric 1 with impact factor 0.7
+- L1_Metric 1 depends on L2_Metric 2 with impact factor 0.8
+- L1_Metric 1 depends on L2_Metric 3 with impact factor -0.5
+- L1_Metric 2 default value = 80
+- L1_Metric 2 depends on L2_Metric 3 with impact factor 0.6
+
+L2 Metrics
+- L2_Metric 1 default value = 24
+- L2_Metric 1 uses Excel total change formula U6 = T6 + T7 + T7
+- T6 is Intervention_1 impact 10 applied to Intervention_1 slider
+- T7 is Intervention_2 impact 12 applied to Intervention_2 slider
+- Important: the supplied workbook references T7 twice for L2_Metric 1.
+- L2_Metric 2 default value = 35
+- L2_Metric 2 total change formula U9 = T9 + T10
+- T9 is Intervention_2 impact 8 applied to Intervention_2 slider
+- T10 is Intervention_3 impact 20 applied to Intervention_3 slider
+- L2_Metric 3 default value = 45
+- L2_Metric 3 total change formula U11 = T11 + T12
+- T11 is Intervention_3 impact 25 applied to Intervention_3 slider
+- T12 is Intervention_4 impact 15 applied to Intervention_4 slider
+
+Interventions
+- Intervention_1 slider value is entered in Y6, and Z6 = Y6.
+- Intervention_2 slider value is entered in Y7, and Z7 = Y7.
+- Intervention_3 slider value is entered in Y8, and Z8 = Y8.
+- Intervention_4 slider value is entered in Y9, and Z9 = Y9.
+
+Example Calculation: Intervention_1 = 17, Intervention_2 = 11, Intervention_3 = 11, Intervention_4 = 0
+
+Step 1: Convert sliders
+- Intervention_1 = 17% = 0.17
+- Intervention_2 = 11% = 0.11
+- Intervention_3 = 11% = 0.11
+- Intervention_4 = 0% = 0
+
+Step 2: Calculate L2_Metric 1
+- T6 = 10 * 0.17 / 100 = 0.017
+- T7 = 12 * 0.11 / 100 = 0.0132
+- U6 = T6 + T7 + T7 = 0.017 + 0.0132 + 0.0132 = 0.0434
+- V6 = 24 + (24 * 0.0434) = 25.0416
+- L2_Metric 1 improvement percentage = 4.34%
+
+Step 3: Calculate L2_Metric 2
+- T9 = 8 * 0.11 / 100 = 0.0088
+- T10 = 20 * 0.11 / 100 = 0.022
+- U9 = 0.0088 + 0.022 = 0.0308
+- V9 = 35 + (35 * 0.0308) = 36.078
+- L2_Metric 2 improvement percentage = 3.08%
+
+Step 4: Calculate L2_Metric 3
+- T11 = 25 * 0.11 / 100 = 0.0275
+- T12 = 15 * 0 / 100 = 0
+- U11 = 0.0275 + 0 = 0.0275
+- V11 = 45 + (45 * 0.0275) = 46.2375
+- L2_Metric 3 improvement percentage = 2.75%
+
+Step 5: Calculate L1_Metric 1
+- M6 = 0.7 * 0.0434 = 0.03038
+- M7 = 0.8 * 0.0308 = 0.02464
+- M8 = -0.5 * 0.0275 = -0.01375
+- N6 = M6 + M7 + M8 = 0.04127
+- O6 = 40 + (40 * 0.04127) = 41.6508, rounded/displayed as about 41.65
+- L1_Metric 1 improvement percentage = about 4.13%
+
+Step 6: Calculate L1_Metric 2
+- M9 = 0.6 * 0.0275 = 0.0165
+- N9 = 0.0165
+- O9 = 80 + (80 * 0.0165) = 81.32
+- L1_Metric 2 improvement percentage = 1.65%
+
+Step 7: Calculate BO_1
+- F6 = -0.35 * 0.04127 = -0.0144445
+- F7 = -0.55 * 0.0165 = -0.009075
+- G6 = F6 + F7 = -0.0235195
+- H6 = 100 + (100 * -0.0235195) = 97.64805, displayed as about 97.65
+- BO_1 improvement percentage = about -2.35%
+
+Important Answering Rules For The Chatbot
+1. For calculation questions, explain the formula first.
+2. Then show the upstream path: Intervention -> L2 -> L1 -> Business Outcome.
+3. Then show numeric steps if values are available.
+4. Use the BRD, Excel formulas, database mappings, and this knowledge file as source of truth.
+5. If a formula or mapping is not present in the verified sources, say that it is not available instead of inventing it.
